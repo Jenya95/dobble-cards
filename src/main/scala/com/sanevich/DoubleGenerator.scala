@@ -13,58 +13,56 @@ object DoubleGenerator:
     cardIdHolder.getAndUpdate(c => c.increment)
   }
 
-  private val picIdHolder: AtomicInteger = new AtomicInteger(1)
-
   /** Generate cards content based on desired number of pictures on one card
     * @param n - number of pictures on one card
     * @return cards
     */
   def generateCards(n: Int): Map[CardId, Card] = {
-    val firstCard = Card(
-      List.fill(n)(picIdHolder.getAndIncrement()).map(Picture(_, None))
-    )
 
     @tailrec
-    def loop(curList: Map[CardId, Card]): Map[CardId, Card] = {
-      val newCardId = getAndIncrementCardId()
-      val picList = (1 to n)
-        .foldLeft(List[Picture]()) { case (curCard, _) =>
-          @tailrec
-          def choosePic(startFrom: Int): Picture = {
-            val foundCards = curList.findByPicValue(startFrom)
-            if (foundCards.size == 2) {
-              choosePic(startFrom + 1)
-            } else if (
-              foundCards.size == 1 && !curCard.exists(
-                _.value == startFrom
-              ) && !foundCards.head._2.containsLinkOnCard(newCardId)
-            ) {
-              foundCards.head._2.content
-                .find(_.value == startFrom)
-                .foreach(_.link = Some(newCardId))
-              Picture(startFrom, Some(foundCards.head._1))
-            } else if (
-              !curCard.exists(_.value == startFrom) && foundCards.isEmpty
-            ) {
-              Picture(startFrom, None)
-            } else {
-              choosePic(startFrom + 1)
-            }
+    def createPicture(startFrom: Int, currentListPic: List[Picture], idToCard: Map[CardId, Card], newCardId: CardId): Picture = {
+      idToCard.findByPicValue(startFrom) match {
+        case foundCards if foundCards.size == 2 =>
+          createPicture(startFrom + 1, currentListPic, idToCard, newCardId)
+
+        case foundCards if foundCards.size == 1 =>
+          val (existingCardId, existingCard) = foundCards.head
+          if (!currentListPic.exists(_.value == startFrom) && !existingCard.containsLinkOnCard(newCardId)) {
+            existingCard.content
+              .find(_.value == startFrom)
+              .foreach(_.link = Some(newCardId))
+            Picture(startFrom, Some(existingCardId))
+          } else {
+            createPicture(startFrom + 1, currentListPic, idToCard, newCardId)
           }
-          curCard :+ choosePic(1)
-        }
 
-      val newCard = Card(picList)
+        case _ if !currentListPic.exists(_.value == startFrom) =>
+          Picture(startFrom, None)
 
-      val newCardsMap: Map[CardId, Card] = curList ++ Map(newCardId -> newCard)
-
-      if (newCardsMap.containsNullLinks) {
-        loop(newCardsMap)
-      } else {
-        newCardsMap
+        case _ =>
+          createPicture(startFrom + 1, currentListPic, idToCard, newCardId)
       }
     }
 
+    @tailrec
+    def loop(cards: Map[CardId, Card]): Map[CardId, Card] = {
+      val newCardId = getAndIncrementCardId()
+
+      val picList = (1 to n)
+        .foldLeft(List[Picture]()) { (currentListPic, _) =>
+          currentListPic :+ createPicture(1, currentListPic, cards, newCardId)
+        }
+
+      val updatedCards = cards + (newCardId -> Card(picList))
+
+      if (updatedCards.containsNullLinks) {
+        loop(updatedCards)
+      } else {
+        updatedCards
+      }
+    }
+
+    val firstCard = Card((1 to n).map(Picture(_, None)).toList)
     loop(Map(getAndIncrementCardId() -> firstCard))
   }
 
